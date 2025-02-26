@@ -46,23 +46,32 @@ After installation, turn it on or off by choosing *View > Show Guide Sheets* (zh
 
 You can change the color of guide lines. Just set the font custom parameter `Guide Color` in Hex color code, e.g. FF0000 means red lines.
 Or you can set two color codes, e.g. FF0000,00FF00. The second one will be used for closed paths of your guide sheet.
+
 If you create a parameter like `Guide Color:XXX`, guide glyphs ending with `.c_XXX` suffix will use this color setting.
+
 You can also make dashed lines by creating `Line Style` parameter with values like "solid" or "dotted".
 Similarly, you can specify two styles separated by comma, e.g. "solid,dotted" for open/closed paths.
+
 `Line Style:XXX` parameters will apply to guide glyphs ending with `.c_XXX` suffix.
 
 想要更改稿紙線條顏色，可以在字型資訊視窗中設定字型的自訂參數。名稱為 `Guide Color` ，請設定 6 位數的十六進位色碼。例如 FF0000 表示紅色。
 或是您可指定兩種顏色，像是 FF0000,00FF00 這樣，此時第二組顏色會被套用在封閉路徑上（開放路徑與封閉路徑顯示成不同顏色）。
+
 若建立 `Guide Color:XXX` 參數，則名稱結尾為 `.c_XXX` 的稿紙字符會套用此顏色設定。
+
 另外，可透過 `Line Style` 參數設定線條為實線（solid）或虛線（dotted），例如設定為 "dotted" 即可讓稿紙線條變成虛線。
 也可以像顏色設定一樣用逗號分隔兩種樣式，例如 "solid,dotted" 分別套用至開放與封閉路徑。
+
 `Line Style:XXX` 參數會套用至名稱結尾為 `.c_XXX` 的稿紙字符。
 
 ガイドの色は変更できます。フォントパラメータ `Guide Color` を作って、6 桁の十六進数のカラーコードを指定してください。たとえば FF0000 は赤です。
 FF0000,00FF00 のように二種類の色を指定することができます。この場合、2個目の色はに閉じたパスに適用されます。（つまり開かれたパスと閉じたパスを違う色で表示することが可能です。）
+
 `Guide Color:XXX` というパラメーターを作った場合、原稿用紙のグリフ名の末尾に `.c_XXX` というサフィックスがついているものの色を別途設定できます。*XXX*は任意の名称です。
+
 また、ガイドの線を点線に変更することができます。フォントパラメータ `Line Style` を作って、solid また dotted を指定してください。
 色設定と同様に、閉じたパスと開かれたパスを別々に設定することも可能です。
+
 `Line Style:XXX` というパラメーターを作った場合、こちらも色設定と同様、原稿用紙のグリフ名の末尾に `.c_XXX` というサフィックスがついているものの線のスタイルを別途設定できます。
 
 
