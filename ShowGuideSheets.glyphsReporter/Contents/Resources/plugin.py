@@ -42,45 +42,62 @@ class ShowGuideSheets(ReporterPlugin):
 		if scale < 0.25:
 			return
 
-		guideGlyphs = []
-		# Collect all possible guide glyph names
-		possibleNames = []
-		if script:
-			possibleNames.append('_guide.' + script)
-		if category:
-			possibleNames.append('_guide.' + category)
-		if script and category:
-			possibleNames.append('_guide.' + script + '.' + category)
-			possibleNames.append('_guide.' + category + '.' + script)
+		if not hasattr(self, 'cachedGuideGlyphs') or self.cachedGuideGlyphs is None:
+			self.cachedGuideGlyphs = {}
+		
+		cacheKey = f"{script}_{category}_{masterId}"
+		if cacheKey in self.cachedGuideGlyphs:
+			guideGlyphs = self.cachedGuideGlyphs[cacheKey]
+		else:
+			guideGlyphs = []
+			# Collect all possible guide glyph names
+			possibleNames = []
+			if script:
+				possibleNames.append('_guide.' + script)
+			if category:
+				possibleNames.append('_guide.' + category)
+			if script and category:
+				possibleNames.append('_guide.' + script + '.' + category)
+				possibleNames.append('_guide.' + category + '.' + script)
 
-		# Add custom guide glyphs with .c_[name] suffix
-		for glyph in Glyphs.font.glyphs:
-			if glyph.name.startswith('_guide.') and '.c_' in glyph.name:
-				possibleNames.append(glyph.name)
+			# Add custom guide glyphs with .c_[name] suffix
+			for glyph in Glyphs.font.glyphs:
+				if glyph.name.startswith('_guide.') and '.c_' in glyph.name:
+					possibleNames.append(glyph.name)
 
-		# Collect all guide glyphs
-		for name in possibleNames:
-			guideGlyph = Glyphs.font.glyphs[name]
-			if guideGlyph:
-				guideGlyphs.append(guideGlyph)
+			# Collect all guide glyphs
+			for name in possibleNames:
+				guideGlyph = Glyphs.font.glyphs[name]
+				if guideGlyph:
+					guideGlyphs.append(guideGlyph)
 
-		# Fallback to a general guide glyph
-		if not guideGlyphs:
-			guideGlyph = Glyphs.font.glyphs['_guide.any']
-			if guideGlyph:
-				guideGlyphs.append(guideGlyph)
+			# Fallback to a general guide glyph
+			if not guideGlyphs:
+				guideGlyph = Glyphs.font.glyphs['_guide.any']
+				if guideGlyph:
+					guideGlyphs.append(guideGlyph)
+					
+			# キャッシュに保存
+			self.cachedGuideGlyphs[cacheKey] = guideGlyphs
 
 		if not guideGlyphs:
 			return
 
+		# スケールに応じて処理を調整
+		showNodes = scale > 0.4
+		
 		# Iterate over all collected guide glyphs
 		for guideGlyph in guideGlyphs:
 			guideLayer = guideGlyph.layers[masterId]
 			if guideLayer is None:
 				continue
 
+			# パスの計算は必要な場合のみ行う
 			closedPaths = guideLayer.completeBezierPath.copy()
 			opendPath = guideLayer.completeOpenBezierPath.copy()
+			
+			if closedPaths is None and opendPath is None:
+				continue
 
 			# Determine color based on custom parameter or default
 			colorSuffix = guideGlyph.name.split('.c_')[-1] if '.c_' in guideGlyph.name else None
@@ -95,24 +112,27 @@ class ShowGuideSheets(ReporterPlugin):
 
 			# show guides
 			try:
-				color.set()
-				closedPaths.setLineWidth_(1.0 / scale)
-				if closedLineStyle == "dotted":
-					closedPaths.setLineDash_count_phase_([6.0 / scale, 3.0 / scale], 2, 0)
-				closedPaths.stroke()
+				# closedPathsが存在する場合のみ処理
+				if closedPaths:
+					color.set()
+					closedPaths.setLineWidth_(1.0 / scale)
+					if closedLineStyle == "dotted":
+						closedPaths.setLineDash_count_phase_([6.0 / scale, 3.0 / scale], 2, 0)
+					closedPaths.stroke()
 
-				color = self.getColor(0, 0.35) if not colorSuffix else self.getColorBySuffix(colorSuffix, 0, 0.35)
-				color.set()
-				opendPath.setLineWidth_(1.0 / scale)
-				if openLineStyle == "dotted":
-					opendPath.setLineDash_count_phase_([6.0 / scale, 3.0 / scale], 2, 0)
-				opendPath.stroke()
+				# opendPathが存在する場合のみ処理
+				if opendPath:
+					color = self.getColor(0, 0.35) if not colorSuffix else self.getColorBySuffix(colorSuffix, 0, 0.35)
+					color.set()
+					opendPath.setLineWidth_(1.0 / scale)
+					if openLineStyle == "dotted":
+						opendPath.setLineDash_count_phase_([6.0 / scale, 3.0 / scale], 2, 0)
+					opendPath.stroke()
 
-				if guideLayer.annotations:
+				# アノテーションの表示を最適化
+				if guideLayer.annotations and scale > 0.3:
 					for ann in guideLayer.annotations:
-						if ann.type != TEXT:
-							continue
-						if ann.text is None:
+						if ann.type != TEXT or ann.text is None:
 							continue
 						self.drawTextAtPoint(
 								ann.text, ann.position,
@@ -126,16 +146,17 @@ class ShowGuideSheets(ReporterPlugin):
 				import traceback
 				print(traceback.format_exc())
 
-			# show on-path nodes
-			if scale > 0.4:
+			# show on-path nodes - スケールが十分大きい場合のみ
+			if showNodes:
 				try:
 					for path in layer.paths:
 						for node in path.nodes:
 							if node.type == OFFCURVE:
 								continue
-							if closedPaths.isStrokeHitByPoint_padding_(node.position, .6):
+							# パスが存在する場合のみチェック
+							if closedPaths and closedPaths.isStrokeHitByPoint_padding_(node.position, .6):
 								self.drawOnPathPoint(node.position, self.getColor(1, 0.25), scale)
-							if opendPath.isStrokeHitByPoint_padding_(node.position, .6):
+							elif opendPath and opendPath.isStrokeHitByPoint_padding_(node.position, .6):
 								self.drawOnPathPoint(node.position, self.getColor(0, 0.25), scale)
 
 				except Exception as e:
@@ -159,6 +180,14 @@ class ShowGuideSheets(ReporterPlugin):
 
 	@objc.python_method
 	def getColor(self, index, alpha):
+		# キャッシュを使用して色の計算を最適化
+		if not hasattr(self, 'colorCache'):
+			self.colorCache = {}
+		
+		cacheKey = f"{index}_{alpha}"
+		if cacheKey in self.colorCache:
+			return self.colorCache[cacheKey]
+			
 		colorHex = Glyphs.font.customParameters["Guide Color"]
 
 		try:
@@ -170,12 +199,24 @@ class ShowGuideSheets(ReporterPlugin):
 				r = int(colorHex[0:2], 16) / 255.0
 				g = int(colorHex[2:4], 16) / 255.0
 				b = int(colorHex[4:6], 16) / 255.0
-			return NSColor.colorWithRed_green_blue_alpha_(r, g, b, alpha)
+			color = NSColor.colorWithRed_green_blue_alpha_(r, g, b, alpha)
 		except:
-			return NSColor.colorWithRed_green_blue_alpha_(0.1, 0.6, 0.8, alpha)
+			color = NSColor.colorWithRed_green_blue_alpha_(0.1, 0.6, 0.8, alpha)
+			
+		# キャッシュに保存
+		self.colorCache[cacheKey] = color
+		return color
 
 	@objc.python_method
-	def getColorBySuffix(self, suffix, index,  alpha):
+	def getColorBySuffix(self, suffix, index, alpha):
+		# キャッシュを使用して色の計算を最適化
+		if not hasattr(self, 'colorSuffixCache'):
+			self.colorSuffixCache = {}
+		
+		cacheKey = f"{suffix}_{index}_{alpha}"
+		if cacheKey in self.colorSuffixCache:
+			return self.colorSuffixCache[cacheKey]
+			
 		# Access custom parameters using dictionary-like indexing
 		colorHex = Glyphs.font.customParameters[f"Guide Color:{suffix}"] if f"Guide Color:{suffix}" in Glyphs.font.customParameters else None
 
@@ -188,12 +229,24 @@ class ShowGuideSheets(ReporterPlugin):
 				r = int(colorHex[0:2], 16) / 255.0
 				g = int(colorHex[2:4], 16) / 255.0
 				b = int(colorHex[4:6], 16) / 255.0
-			return NSColor.colorWithRed_green_blue_alpha_(r, g, b, alpha)
+			color = NSColor.colorWithRed_green_blue_alpha_(r, g, b, alpha)
 		except:
-			return NSColor.colorWithRed_green_blue_alpha_(0.1, 0.6, 0.8, alpha)
+			color = NSColor.colorWithRed_green_blue_alpha_(0.1, 0.6, 0.8, alpha)
+			
+		# キャッシュに保存
+		self.colorSuffixCache[cacheKey] = color
+		return color
 
 	@objc.python_method
 	def getLineStyle(self, suffix, pathType):
+		# キャッシュを使用してスタイルの計算を最適化
+		if not hasattr(self, 'lineStyleCache'):
+			self.lineStyleCache = {}
+		
+		cacheKey = f"{suffix}_{pathType}"
+		if cacheKey in self.lineStyleCache:
+			return self.lineStyleCache[cacheKey]
+			
 		# カスタムパラメーターから線のスタイルを取得
 		paramName = f"Line Style:{suffix}" if suffix else "Line Style"
 		if paramName in Glyphs.font.customParameters:
@@ -204,14 +257,18 @@ class ShowGuideSheets(ReporterPlugin):
 
 		# パラメーターが1つしかない場合、両方に適用
 		if len(styles) == 1:
-			return styles[0].strip()
-
+			result = styles[0].strip()
 		# パスの種類に応じてスタイルを返す
-		if pathType == "closed":
-			return styles[1].strip() if len(styles) > 1 else styles[0].strip()
+		elif pathType == "closed":
+			result = styles[1].strip() if len(styles) > 1 else styles[0].strip()
 		elif pathType == "open":
-			return styles[0].strip()
-		return "solid"
+			result = styles[0].strip()
+		else:
+			result = "solid"
+			
+		# キャッシュに保存
+		self.lineStyleCache[cacheKey] = result
+		return result
 
 	@objc.python_method
 	def __file__(self):
