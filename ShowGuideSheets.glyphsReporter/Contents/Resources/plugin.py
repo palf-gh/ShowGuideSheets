@@ -102,8 +102,9 @@ class ShowGuideSheets(ReporterPlugin):
 	@objc.python_method
 	def isGlyphMatchingGuide(self, glyphName, guideName):
 		"""グリフが指定のガイドグリフに一致するかをチェック"""
-		# ガイド名の解析
-		guideParts = guideName.split('.')
+		# ガイド名の解析 - カラー指定部分（.c_XXX）を除去してから処理
+		baseGuideName = guideName.split('.c_')[0] if '.c_' in guideName else guideName
+		guideParts = baseGuideName.split('.')
 		if len(guideParts) < 2 or guideParts[0] != '_guide':
 			return False
 
@@ -319,12 +320,7 @@ class ShowGuideSheets(ReporterPlugin):
 		guideGlyphs = []
 		for guideGlyph in allGuideGlyphs:
 			guideName = guideGlyph.name
-			# 特殊なカスタムカラーガイドはそのまま適用
-			if '.c_' in guideName:
-				guideGlyphs.append(guideGlyph)
-				continue
-				
-			# 通常のガイドグリフはマッチングをチェック
+			# カラー指定のあるものも含めて、すべてのガイドグリフをマッチングチェック
 			if self.isGlyphMatchingGuide(currentGlyphName, guideName):
 				guideGlyphs.append(guideGlyph)
 		
