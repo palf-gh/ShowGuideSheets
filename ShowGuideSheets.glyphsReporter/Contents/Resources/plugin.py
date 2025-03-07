@@ -96,8 +96,103 @@ class ShowGuideSheets(ReporterPlugin):
 		except:
 			# イテレーションに失敗した場合は、更新が必要と判断
 			needsUpdate = True
-					
+
 		return needsUpdate
+
+	@objc.python_method
+	def isGlyphMatchingGuide(self, glyphName, guideName):
+		"""グリフが指定のガイドグリフに一致するかをチェック"""
+		# ガイド名の解析
+		guideParts = guideName.split('.')
+		if len(guideParts) < 2 or guideParts[0] != '_guide':
+			return False
+
+		# 基本的なscript/categoryの要素を抽出
+		baseElements = []
+		includeElements = []
+		excludeElements = []
+		
+		for part in guideParts[1:]:
+			if part.startswith('-'):
+				# 除外サフィックス
+				excludeElements.append(part[1:])
+			elif '[' in part and ']' in part:
+				# 包含サフィックス
+				includeElements.append(part)
+			else:
+				# 基本要素（script/category）
+				baseElements.append(part)
+		
+		# グリフの属性
+		glyph = Glyphs.font.glyphs[glyphName]
+		if not glyph:
+			return False
+			
+		script = glyph.script
+		category = glyph.category
+		
+		# 基本要素のチェック - scriptまたはcategoryのどちらかが一致する必要がある
+		baseMatched = False
+		if len(baseElements) == 0:
+			# 基本要素がなければ無条件に一致
+			baseMatched = True
+		else:
+			for element in baseElements:
+				if element == script or element == category or element == 'any':
+					baseMatched = True
+					break
+		
+		if not baseMatched:
+			return False
+		
+		# 包含サフィックスのチェック - 1つでも一致すれば表示
+		if includeElements:
+			includeMatched = False
+			for element in includeElements:
+				# カスタムサフィックスの抽出（例: [serif]から'serif'を取得）
+				suffix = element.strip('[]')
+				if suffix in glyphName:
+					includeMatched = True
+					break
+			if not includeMatched:
+				return False
+		
+		# 除外サフィックスのチェック - 1つでも一致すれば表示しない
+		for element in excludeElements:
+			if element in glyphName:
+				return False
+				
+		return True
+
+	@objc.python_method
+	def parseGuideGlyphName(self, name):
+		"""ガイドグリフ名を解析して構成要素を返す"""
+		if not name.startswith('_guide.'):
+			return None
+			
+		parts = name.split('.')
+		result = {
+			'name': name,
+			'base': [],
+			'include': [],
+			'exclude': []
+		}
+		
+		for part in parts[1:]:
+			if part.startswith('-'):
+				# 除外サフィックス
+				result['exclude'].append(part[1:])
+			elif '[' in part and ']' in part:
+				# 包含サフィックス
+				result['include'].append(part.strip('[]'))
+			elif '.c_' in part:
+				# 色指定は無視
+				continue
+			else:
+				# 基本要素（script/category）
+				result['base'].append(part)
+				
+		return result
 
 	@objc.python_method
 	def needsUpdateForGlyph(self, glyph):
@@ -208,33 +303,31 @@ class ShowGuideSheets(ReporterPlugin):
 		if not layer or not layer.parent:
 			return None
 			
-		script = layer.parent.script
-		category = layer.parent.category
-		
-		# ガイドグリフを収集
-		guideGlyphs = []
-		possibleNames = []
-		
-		if script:
-			possibleNames.append('_guide.' + script)
-		if category:
-			possibleNames.append('_guide.' + category)
-		if script and category:
-			possibleNames.append('_guide.' + script + '.' + category)
-			possibleNames.append('_guide.' + category + '.' + script)
-
-		# カスタムガイドグリフを追加
 		font = layer.parent.parent
-		for glyph in font.glyphs:
-			if glyph.name.startswith('_guide.') and '.c_' in glyph.name:
-				possibleNames.append(glyph.name)
+		currentGlyphName = layer.parent.name
 		
-		# ガイドグリフを収集
-		for name in possibleNames:
-			guideGlyph = font.glyphs[name]
-			if guideGlyph:
+		# すべてのガイドグリフを収集
+		allGuideGlyphs = []
+		for glyph in font.glyphs:
+			if glyph.name.startswith('_guide.'):
+				allGuideGlyphs.append(glyph)
+		
+		if not allGuideGlyphs:
+			return None
+			
+		# 現在のグリフに適用すべきガイドグリフをフィルタリング
+		guideGlyphs = []
+		for guideGlyph in allGuideGlyphs:
+			guideName = guideGlyph.name
+			# 特殊なカスタムカラーガイドはそのまま適用
+			if '.c_' in guideName:
 				guideGlyphs.append(guideGlyph)
-
+				continue
+				
+			# 通常のガイドグリフはマッチングをチェック
+			if self.isGlyphMatchingGuide(currentGlyphName, guideName):
+				guideGlyphs.append(guideGlyph)
+		
 		# 一般的なガイドグリフにフォールバック
 		if not guideGlyphs:
 			guideGlyph = font.glyphs['_guide.any']
@@ -244,7 +337,7 @@ class ShowGuideSheets(ReporterPlugin):
 		if not guideGlyphs:
 			return None
 		
-		# パスの計算
+		# パスの計算（以前と同じ）
 		guidePaths = []
 		
 		for guideGlyph in guideGlyphs:
@@ -341,19 +434,19 @@ class ShowGuideSheets(ReporterPlugin):
 				if closedLineStyle == "dotted":
 					closedPath.setLineDash_count_phase_([6.0 / scale, 3.0 / scale], 2, 0)
 				closedPath.stroke()
-				
+
 				# 開いたパスを描画
 				openPathInfo = guide['open']
 				openPath = openPathInfo['path']
 				openColor = openPathInfo['color']
 				openLineStyle = openPathInfo['style']
-				
+
 				openColor.set()
 				openPath.setLineWidth_(1.0 / scale)
 				if openLineStyle == "dotted":
 					openPath.setLineDash_count_phase_([6.0 / scale, 3.0 / scale], 2, 0)
 				openPath.stroke()
-				
+
 				# アノテーションを描画（拡大率が十分あれば）
 				if scale >= 0.3:
 					annotations = guide['annotations']
@@ -369,7 +462,7 @@ class ShowGuideSheets(ReporterPlugin):
 								fontColor=openColor,
 								align="topleft",
 							)
-						
+
 			except Exception as e:
 				self.logToConsole("showGuideSheets: %s\n" % str(e))
 				import traceback
@@ -384,13 +477,13 @@ class ShowGuideSheets(ReporterPlugin):
 					for node in path.nodes:
 						if node.type != OFFCURVE:
 							nodePositions.append(node.position)
-				
+
 				# 位置ごとに一度だけチェック
 				for pos in nodePositions:
 					for guide in optimizedPaths:
 						closedPath = guide['closed']['path']
 						openPath = guide['open']['path']
-						
+
 						if closedPath.isStrokeHitByPoint_padding_(pos, .6):
 							self.drawOnPathPoint(pos, self.getColor(1, 0.25), scale)
 							break  # このノードはすでに描画したので次へ
