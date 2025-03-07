@@ -117,9 +117,9 @@ class ShowGuideSheets(ReporterPlugin):
 			if part.startswith('-'):
 				# 除外サフィックス
 				excludeElements.append(part[1:])
-			elif '[' in part and ']' in part:
-				# 包含サフィックス
-				includeElements.append(part)
+			elif part.startswith('in_'):
+				# 包含サフィックス - in_を接頭辞として使用
+				includeElements.append(part[3:])
 			else:
 				# 基本要素（script/category）
 				baseElements.append(part)
@@ -150,9 +150,7 @@ class ShowGuideSheets(ReporterPlugin):
 		if includeElements:
 			includeMatched = False
 			for element in includeElements:
-				# カスタムサフィックスの抽出（例: [serif]から'serif'を取得）
-				suffix = element.strip('[]')
-				if suffix in glyphName:
+				if element in glyphName:
 					includeMatched = True
 					break
 			if not includeMatched:
@@ -179,19 +177,26 @@ class ShowGuideSheets(ReporterPlugin):
 			'exclude': []
 		}
 		
+		# カラー部分を取り除く
+		colorSuffix = None
+		if '.c_' in name:
+			parts = name.split('.c_')[0].split('.')
+			colorSuffix = name.split('.c_')[1]
+		
 		for part in parts[1:]:
 			if part.startswith('-'):
 				# 除外サフィックス
 				result['exclude'].append(part[1:])
-			elif '[' in part and ']' in part:
-				# 包含サフィックス
-				result['include'].append(part.strip('[]'))
-			elif '.c_' in part:
-				# 色指定は無視
-				continue
+			elif part.startswith('in_'):
+				# 包含サフィックス - in_を接頭辞として使用
+				result['include'].append(part[3:])
 			else:
 				# 基本要素（script/category）
 				result['base'].append(part)
+		
+		# カラーサフィックスを戻す
+		if colorSuffix:
+			result['color'] = colorSuffix
 				
 		return result
 
