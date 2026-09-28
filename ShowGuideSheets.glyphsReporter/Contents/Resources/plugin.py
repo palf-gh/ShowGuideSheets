@@ -201,6 +201,22 @@ class ShowGuideSheets(ReporterPlugin):
 		return result
 
 	@objc.python_method
+	def getHiddenGuides(self, font):
+		"""パレットで非表示に設定されたガイドグリフ名のセットを返す"""
+		if not font:
+			return None
+		try:
+			raw = font.userData["ShowGuideSheets.hiddenGuides"] if font.userData else None
+		except Exception:
+			raw = None
+		if not raw:
+			return None
+		try:
+			return set(raw)
+		except Exception:
+			return None
+
+	@objc.python_method
 	def needsUpdateForGlyph(self, glyph):
 		"""グリフが変更されたかチェック"""
 		if not glyph:
@@ -367,6 +383,7 @@ class ShowGuideSheets(ReporterPlugin):
 				
 				# パスとその属性を保存
 				guidePaths.append({
+					'glyphName': guideGlyph.name,
 					'closed': {
 						'path': closedPath,
 						'color': closedColor,
@@ -417,7 +434,15 @@ class ShowGuideSheets(ReporterPlugin):
 		guidePaths = self.getGuidePathsForLayer(layer, masterId, scale)
 		if not guidePaths:
 			return
-			
+
+		# パレットで非表示にされたガイドを除外
+		font = layer.parent.parent if layer and layer.parent else None
+		hiddenGuides = self.getHiddenGuides(font)
+		if hiddenGuides:
+			guidePaths = [g for g in guidePaths if g.get('glyphName') not in hiddenGuides]
+			if not guidePaths:
+				return
+
 		# スケールに応じてパスを最適化
 		optimizedPaths = self.optimizePathsForScale(guidePaths, scale)
 

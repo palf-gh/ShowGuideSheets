@@ -42,6 +42,24 @@ After installation, turn it on or off by choosing *View > Show Guide Sheets* (zh
 
 
 
+## Palette | パレット
+
+A companion **Guide Sheets palette** appears in the right sidebar of Glyphs. Use it to manage all `_guide.*` glyphs of the current font from one place.
+
+- **Visibility toggle** — uncheck to hide a guide in the editor (saved per-font in `font.userData["ShowGuideSheets.hiddenGuides"]`).
+- **Group headers** — guides are grouped by their base condition (script/category).
+- **Add (+)** — opens a dialog to set base / include / exclude / color suffix, plus an optional display name. Creates the corresponding `_guide.XXX` glyph.
+- **Remove (−)** — deletes the selected guide glyph.
+- **Double-click** a guide — if an edit tab is active, the guide glyph is appended (`/_guide.XXX `) to that tab; otherwise a new tab is opened with the guide.
+- **Right-click** a guide:
+  - *Edit Display Name…* — saved to `glyph.userData["ShowGuideSheets.displayName"]` (the underlying glyph name is unchanged).
+  - *Edit Conditions…* — edit base/include/exclude/color suffix; **renames the underlying glyph**.
+  - *Edit Color…* — pick an open-path and a closed-path color via macOS color picker; written to the `Guide Color:XXX` font parameter.
+  - *Open in Edit View* / *Delete*.
+
+サイドバーに「原稿用紙」パレットを追加しました。現在のフォントの `_guide.*` グリフを一覧で管理できます：表示/非表示の切替（フォントごとに保存）、追加・削除、ダブルクリックで編集タブに追加 or 新規タブで開く、右クリックで表示名・表示条件・ガイドカラーを編集（条件の編集はグリフをリネームします）。表示条件ごとにグループ化されて表示されます。
+
+
 ## Custom Parameter | 自訂參數 | カスタムパラメータ
 
 You can change the color of guide lines. Just set the font custom parameter `Guide Color` in Hex color code, e.g. FF0000 means red lines.
