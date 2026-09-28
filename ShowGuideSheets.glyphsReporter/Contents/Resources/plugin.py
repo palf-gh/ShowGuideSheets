@@ -424,7 +424,30 @@ class ShowGuideSheets(ReporterPlugin):
 		return optimizedPaths
 
 	@objc.python_method
+	def sourceLayer(self, layer):
+		"""描画用コピーを受け取った場合は、フォント内の元のレイヤーに戻す。
+
+		他のプラグインが GSPrepareLayerCallback でレイヤーを加工すると（可変ストロークなど）、
+		Glyphs は加工済みのコピーを渡してくることがある。コピーのグリフはフォントを持たないため、
+		そのままではガイドグリフを探せず原稿用紙が表示されない。
+		"""
+		try:
+			glyph = layer.parent if layer else None
+			if glyph is None or glyph.parent is not None:
+				return layer
+			font = Glyphs.font
+			original = font.glyphs[glyph.name] if font else None
+			if original is None:
+				return layer
+			return (original.layers[layer.layerId]
+				or original.layers[layer.associatedMasterId]
+				or layer)
+		except Exception:
+			return layer
+
+	@objc.python_method
 	def background(self, layer):
+		layer = self.sourceLayer(layer)
 		masterId = layer.associatedMasterId
 		scale = self.getScale()
 		if scale < 0.25:
