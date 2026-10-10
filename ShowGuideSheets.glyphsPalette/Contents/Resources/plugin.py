@@ -25,6 +25,7 @@ from AppKit import (
 	NSButton,
 	NSColor,
 	NSColorWell,
+	NSEvent,
 	NSFont,
 	NSImage,
 	NSImageAlignCenter,
@@ -48,7 +49,7 @@ from AppKit import (
 	NSViewWidthSizable,
 	NSWarningAlertStyle,
 )
-from Foundation import NSIndexSet
+from Foundation import NSIndexSet, NSObject
 from vanilla import Button, Group, ScrollView, Window
 
 print("ShowGuideSheetsPalette: plugin.py loaded")
@@ -308,8 +309,18 @@ class ShowGuideSheetsPalette(PalettePlugin):
 
 	@objc.python_method
 	def update(self, sender):
+		# Glyphs posts this on every mouse-drag event while editing: refresh once
+		# for a burst of updates, after the mouse button is released.
+		NSObject.cancelPreviousPerformRequestsWithTarget_selector_object_(
+			self, "deferredRefresh:", None)
+		self.performSelector_withObject_afterDelay_("deferredRefresh:", None, 0.0)
+
+	def deferredRefresh_(self, sender):
+		if NSEvent.pressedMouseButtons():
+			self.performSelector_withObject_afterDelay_("deferredRefresh:", None, 0.25)
+			return
 		try:
-			self._refresh()
+			self._refresh(onlyIfChanged=True)
 		except Exception:
 			print(traceback.format_exc())
 
@@ -402,7 +413,7 @@ class ShowGuideSheetsPalette(PalettePlugin):
 	# ---------------------------------------------------------------- refresh
 
 	@objc.python_method
-	def _refresh(self):
+	def _refresh(self, onlyIfChanged=False):
 		font = self._currentFont()
 		groups = []
 
@@ -440,6 +451,15 @@ class ShowGuideSheetsPalette(PalettePlugin):
 				g.children.sort(key=lambda n: (n.displayName.lower(), n.glyphName))
 				groups.append(g)
 
+		# Interface updates rarely change the guides: keep the list (and its
+		# row views) when nothing it shows has changed.
+		signature = tuple(
+			(g.name, g.expanded, tuple((n.glyphName, n.displayName, n.colorHex, n.visible)
+			                           for n in g.children))
+			for g in groups)
+		if onlyIfChanged and signature == getattr(self, "_signature", None):
+			return
+		self._signature = signature
 		self._groups = groups
 		self._eyeButtonByName = {}
 
