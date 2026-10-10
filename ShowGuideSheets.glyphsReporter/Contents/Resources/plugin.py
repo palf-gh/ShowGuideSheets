@@ -16,7 +16,7 @@ from __future__ import division, print_function, unicode_literals
 import objc
 from GlyphsApp import Glyphs, OFFCURVE, TEXT
 from GlyphsApp.plugins import ReporterPlugin
-from AppKit import NSRect, NSPoint, NSSize, NSColor, NSBezierPath
+from AppKit import NSRect, NSPoint, NSSize, NSColor, NSBezierPath, NSEvent
 import threading
 import time
 from threading import Thread
@@ -51,6 +51,9 @@ class ShowGuideSheets(ReporterPlugin):
 		self.updateInterval = 0.1  # 更新間隔（秒）
 		self.asyncWorker = None
 		self.currentLayerInfo = None
+		self.guideNamesCache = None  # (font, glyph count, time, names)
+		self.pendingUpdate = False  # 計算中に見つかった変更（終わってから計算し直す）
+		self.guideNamesInterval = 2.0  # グリフ名の一覧を読み直す間隔（秒）
 
 	@objc.python_method
 	def parameterChanged(self, font, paramName):
@@ -100,7 +103,30 @@ class ShowGuideSheets(ReporterPlugin):
 		return needsUpdate
 
 	@objc.python_method
-	def isGlyphMatchingGuide(self, glyphName, guideName):
+	def guideGlyphNames(self, font):
+		"""フォント内のガイドグリフ名の一覧。
+
+		全グリフをたどるのは重い（CJK フォントでは数万グリフ）ので、グリフ数が変わったときか、
+		一定時間ごとにだけ読み直す。
+		"""
+		if not font:
+			return []
+		try:
+			count = len(font.glyphs)
+		except Exception:
+			count = None
+		now = time.time()
+		cached = self.guideNamesCache
+		if cached and cached[0] is font and cached[1] == count and \
+				now - cached[2] < self.guideNamesInterval:
+			return cached[3]
+		names = [glyph.name for glyph in font.glyphs
+				 if glyph.name and glyph.name.startswith('_guide.')]
+		self.guideNamesCache = (font, count, now, names)
+		return names
+
+	@objc.python_method
+	def isGlyphMatchingGuide(self, glyphName, guideName, font=None):
 		"""グリフが指定のガイドグリフに一致するかをチェック"""
 		# ガイド名の解析 - カラー指定部分（.c_XXX）を除去してから処理
 		baseGuideName = guideName.split('.c_')[0] if '.c_' in guideName else guideName
@@ -125,7 +151,7 @@ class ShowGuideSheets(ReporterPlugin):
 				baseElements.append(part)
 		
 		# グリフの属性
-		glyph = Glyphs.font.glyphs[glyphName]
+		glyph = (font or Glyphs.font).glyphs[glyphName]
 		if not glyph:
 			return False
 			
@@ -217,25 +243,34 @@ class ShowGuideSheets(ReporterPlugin):
 			return None
 
 	@objc.python_method
-	def needsUpdateForGlyph(self, glyph):
-		"""グリフが変更されたかチェック"""
+	def needsUpdateForGlyph(self, glyph, masterId=None):
+		"""ガイドグリフの形が変わったかチェック
+
+		このマスターのレイヤーのパスとアノテーションを文字列にして比べる
+		（lastChange は編集しても変わらないことがある）。"""
 		if not glyph:
 			return False
-			
-		# 単純なタイムスタンプ比較ではなく、グリフのIDと修正回数を使用
 		try:
-			cacheKey = str(glyph.id) if hasattr(glyph, 'id') else glyph.name
-			currentModCount = id(glyph)  # 最もシンプルな比較方法として、IDを使用
-		except:
+			cacheKey = (str(glyph.id), masterId)
+			layer = glyph.layers[masterId] if masterId else None
+			if layer is None:
+				currentState = None
+			else:
+				currentState = (
+					str(layer.completeBezierPath.description()),
+					str(layer.completeOpenBezierPath.description()),
+					tuple((ann.text, ann.position.x, ann.position.y) for ann in layer.annotations or ()),
+				)
+		except Exception:
 			# 何らかのエラーが発生した場合は、更新が必要と判断
 			return True
-		
-		lastModCount = self.lastModificationDates.get(cacheKey)
-		if lastModCount != currentModCount:
-			self.lastModificationDates[cacheKey] = currentModCount
+
+		lastState = self.lastModificationDates.get(cacheKey)
+		if lastState != currentState:
+			self.lastModificationDates[cacheKey] = currentState
 			return True
 		return False
-		
+
 	@objc.python_method
 	def asyncUpdateGuidePaths(self, layerInfo):
 		"""バックグラウンドスレッドでガイドパスを更新"""
@@ -272,42 +307,33 @@ class ShowGuideSheets(ReporterPlugin):
 		# ガイドパスがキャッシュになければ、非同期更新を開始
 		if cacheKey not in self.backgroundCache:
 			needsAsyncUpdate = True
+		# ドラッグ中はガイドが変わらないので確認しない（マウスイベントごとに描画される）
+		elif NSEvent.pressedMouseButtons():
+			pass
 		# 前回の更新から一定時間が経過していたら、バックグラウンドで更新
 		elif currentTime - self.lastRedrawTime > self.updateInterval:
-			script = layer.parent.script
-			category = layer.parent.category
 			font = layer.parent.parent
 			
-			# フォントパラメータや関連ガイドグリフに変更があるかチェック
+			# フォントパラメータやガイドグリフに変更があるかチェック
 			if self.needsUpdateForFont(font):
 				needsAsyncUpdate = True
 			else:
-				# ガイドグリフの変更をチェック
-				possibleNames = []
-				if script:
-					possibleNames.append('_guide.' + script)
-				if category:
-					possibleNames.append('_guide.' + category)
-				if script and category:
-					possibleNames.append('_guide.' + script + '.' + category)
-					possibleNames.append('_guide.' + category + '.' + script)
-				
-				for name in possibleNames:
-					guideGlyph = font.glyphs[name]
-					if guideGlyph and self.needsUpdateForGlyph(guideGlyph):
+				# どのガイドグリフもこのグリフに掛かりうる（_guide.any、in_ 付きなど）ので全部見る。
+				# 一つが変わっても残りの状態は記録しておく（次回また「変更あり」にならないように）
+				for name in self.guideGlyphNames(font):
+					glyph = font.glyphs[name]
+					if glyph and self.needsUpdateForGlyph(glyph, masterId):
 						needsAsyncUpdate = True
-						break
-				
-				# カスタムガイドグリフの変更をチェック
-				if not needsAsyncUpdate:
-					for glyph in font.glyphs:
-						if glyph.name.startswith('_guide.') and '.c_' in glyph.name:
-							if self.needsUpdateForGlyph(glyph):
-								needsAsyncUpdate = True
-								break
-		
-		# 非同期更新を開始（既に更新中でなければ）
-		if needsAsyncUpdate and not self.isUpdating:
+			# 変更がなくても次の確認は一定時間後に（毎回の描画で確認しない）
+			self.lastRedrawTime = currentTime
+
+		# 非同期更新を開始（既に更新中なら、終わってから）
+		if self.pendingUpdate and not NSEvent.pressedMouseButtons():
+			needsAsyncUpdate = True
+		if needsAsyncUpdate and self.isUpdating:
+			self.pendingUpdate = True
+		elif needsAsyncUpdate:
+			self.pendingUpdate = False
 			self.isUpdating = True
 			self.lastRedrawTime = currentTime
 			
@@ -329,10 +355,8 @@ class ShowGuideSheets(ReporterPlugin):
 		currentGlyphName = layer.parent.name
 		
 		# すべてのガイドグリフを収集
-		allGuideGlyphs = []
-		for glyph in font.glyphs:
-			if glyph.name.startswith('_guide.'):
-				allGuideGlyphs.append(glyph)
+		allGuideGlyphs = [glyph for glyph in (font.glyphs[name] for name in self.guideGlyphNames(font))
+						  if glyph]
 		
 		if not allGuideGlyphs:
 			return None
@@ -342,7 +366,7 @@ class ShowGuideSheets(ReporterPlugin):
 		for guideGlyph in allGuideGlyphs:
 			guideName = guideGlyph.name
 			# カラー指定のあるものも含めて、すべてのガイドグリフをマッチングチェック
-			if self.isGlyphMatchingGuide(currentGlyphName, guideName):
+			if self.isGlyphMatchingGuide(currentGlyphName, guideName, font):
 				guideGlyphs.append(guideGlyph)
 		
 		# 一般的なガイドグリフにフォールバック
@@ -527,17 +551,24 @@ class ShowGuideSheets(ReporterPlugin):
 						if node.type != OFFCURVE:
 							nodePositions.append(node.position)
 
-				# 位置ごとに一度だけチェック
+				# 位置ごとに一度だけチェック。色は一度だけ読む（毎回カスタムパラメータを読むと重い）
+				onPathColors = {}
+
+				def onPathColor(index):
+					if index not in onPathColors:
+						onPathColors[index] = self.getColor(index, 0.25)
+					return onPathColors[index]
+
 				for pos in nodePositions:
 					for guide in optimizedPaths:
 						closedPath = guide['closed']['path']
 						openPath = guide['open']['path']
 
 						if closedPath.isStrokeHitByPoint_padding_(pos, .6):
-							self.drawOnPathPoint(pos, self.getColor(1, 0.25), scale)
+							self.drawOnPathPoint(pos, onPathColor(1), scale)
 							break  # このノードはすでに描画したので次へ
 						elif openPath.isStrokeHitByPoint_padding_(pos, .6):
-							self.drawOnPathPoint(pos, self.getColor(0, 0.25), scale)
+							self.drawOnPathPoint(pos, onPathColor(0), scale)
 							break  # このノードはすでに描画したので次へ
 			except Exception as e:
 				self.logToConsole("showGuideSheetNodes: %s\n" % str(e))
